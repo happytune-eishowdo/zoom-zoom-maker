@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Zoom Zoom Maker V1.61</title>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<style>
+:root{--bpm:120;--color1:#00f2ff;--color2:#ff00ff;--ui-color1:#00f2ff;--ui-text-on-color1:#000000;--ui-bg-main:#104e70;--ui-bg-card:rgba(10,26,37,0.9);--base-size:320px;--main-v-x:0px;--main-v-y:0px;--main-img-x:0px;--main-img-y:0px;--main-img-scale:1;--bg-img-x:0px;--bg-img-y:0px;--bg-img-scale:1;--bg-opacity:0.6;--tint-sepia:0;--tint-hue:0deg;--tint-brightness:1;--crt-filter:none;}
+body{margin:0;background:#020205;display:flex;align-items:center;justify-content:center;height:100vh;color:white;font-family:'Consolas',monospace;overflow:hidden;}
+#master-container{width:100%;height:100%;position:relative;filter:sepia(var(--tint-sepia)) hue-rotate(var(--tint-hue)) brightness(var(--tint-brightness)) contrast(1.0);transition:filter 0.3s;background:#020205;}
+.layer{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;}
+#bg-image-layer{background-size:cover;background-position:center;background-repeat:no-repeat;transform:translate(var(--bg-img-x),var(--bg-img-y)) scale(var(--bg-img-scale));display:none;opacity:var(--bg-opacity);z-index:1;}
+#grid-canvas-container{width:100%;height:100%;top:0;left:0;z-index:2;display:none;}
+#grid-canvas{width:100%;height:100%;}
+canvas#main-canvas{z-index:10;position:absolute;top:0;left:0;filter:var(--crt-filter);transition:filter 0.2s;}
+#neon-glow{z-index:5;width:160%;height:160%;top:-30%;left:-30%;background:radial-gradient(circle at 30% 30%,var(--color2) 0%,transparent 50%),radial-gradient(circle at 70% 30%,var(--color1) 0%,transparent 50%),radial-gradient(circle at 30% 70%,var(--color1) 0%,transparent 50%),radial-gradient(circle at 70% 70%,var(--color2) 0%,transparent 50%);opacity:0.4;display:none;mix-blend-mode:screen;filter:blur(90px);animation:fog-vibe 40s linear infinite;}
+#scanlines{z-index:100;display:none;background:linear-gradient(rgba(18,16,16,0) 50%,rgba(0,0,0,0.3) 50%),url('https://www.transparenttextures.com/patterns/stardust.png');background-size:100% 4px,200px 200px;opacity:0.6;pointer-events:none;}
+#vignette{z-index:110;display:none;background:radial-gradient(circle at calc(50% + var(--main-v-x)) calc(50% + var(--main-v-y)),transparent 15%,rgba(0,0,0,0.3) 30%,rgba(0,0,0,0.7) 45%,rgba(0,0,0,0.92) 65%,#000 85%,#000 100%);}
+.controls{position:absolute;top:15px;left:15px;z-index:200;background:var(--ui-bg-main);padding:10px;border-radius:20px;width:280px;max-height:calc(100vh - 30px);overflow-y:auto;box-shadow:0 10px 30px rgba(0,0,0,0.5);opacity:0.5;transition:opacity 0.3s;}
+.controls:hover{opacity:1;}
+.app-header{text-align:center;margin-bottom:8px;}
+.app-logo{font-size:16px;font-weight:900;color:#fff;letter-spacing:2px;}
+.ui-section{background:var(--ui-bg-card);margin-bottom:6px;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);}
+.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-left:6px;border-left:3px solid var(--ui-color1);}
+.section-title{font-size:10px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:1px;margin:0;}
+.sync-trigger{background:none;border:none;color:var(--ui-color1);cursor:pointer;padding:0;display:flex;align-items:center;opacity:0.6;transition:all 0.2s;}
+.sync-trigger:hover{opacity:1;transform:rotate(-30deg);}
+.sync-trigger:active{transform:scale(0.8);}
+.label-group{display:flex;justify-content:space-between;align-items:center;margin-top:4px;margin-bottom:0px;}
+.label-text{font-size:9px;color:#8899aa;font-weight:bold;text-transform:uppercase;}
+.value-badge{font-size:9px;color:var(--ui-text-on-color1)!important;background:var(--ui-color1);padding:1px 8px;border-radius:4px;font-weight:bold;}
+.select-style{width:100%;padding:5px;background:#050a10;color:#fff;border:1px solid #223344;border-radius:4px;font-size:11px;margin-bottom:6px;outline:none;text-align:center;}
+.btn-row{display:flex;gap:4px;margin-bottom:6px;}
+.small-btn{flex:1;padding:5px;font-size:9px;background:#1a2a35;border:none;color:#eee;cursor:pointer;border-radius:4px;font-weight:bold;}
+.small-btn:hover{background:#2a3a45;}
+.small-btn.danger{color:#ff6666;}
+input[type="range"]{width:100%;margin-top:-4px;margin-bottom:6px;accent-color:var(--ui-color1);cursor:pointer;height:3px;}
+.effects-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center;}
+.check-row{display:flex;align-items:center;gap:5px;font-size:9px;cursor:pointer;color:#ccddee;}
+.grid-full-row{grid-column:1 / span 2;display:flex;flex-direction:column;gap:6px;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.05);}
+.grid-toggle-group{display:inline-flex;background:#000;border-radius:4px;overflow:hidden;border:1px solid #333;height:20px;}
+.grid-radio{display:none;}
+.grid-label{padding:0 8px;cursor:pointer;font-size:12px;color:#555;line-height:20px;font-weight:bold;text-align:center;min-width:24px;}
+.grid-radio:checked+.grid-label.mode-btn{background:var(--ui-color1);color:var(--ui-text-on-color1);}
+#gc-1:checked+.grid-label.c1-btn{background:var(--color1);color:#000;}
+#gc-2:checked+.grid-label.c2-btn{background:var(--color2);color:#000;}
+.color-edit-area{display:flex;gap:6px;align-items:center;background:rgba(0,0,0,0.3);padding:6px;border-radius:6px;border:1px dashed rgba(255,255,255,0.1);margin-bottom:6px;}
+.color-edit-icon{color:var(--ui-color1);opacity:0.6;flex-shrink:0;}
+.picker-wrapper{flex:1;height:28px;position:relative;cursor:pointer;transition:transform 0.1s;border-radius:4px;overflow:hidden;}
+.color-input{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200%;height:200%;border:none;border-radius:0;cursor:pointer;background:none;padding:0;}
+.preset-row{display:flex;gap:6px;margin-top:6px;justify-content:space-between;align-items:center;}
+.preset-btn{width:22px;height:22px;border-radius:50%;border:1.5px solid #333;cursor:pointer;background:linear-gradient(135deg,var(--p1) 50%,var(--p2) 50%);transition:transform 0.2s;flex-shrink:0;}
+.status-panel{position:absolute;z-index:200;background:var(--ui-bg-main);padding:8px;border-radius:20px;width:160px;box-sizing:border-box;}
+.status-panel-top{top:15px;right:15px;bottom:auto;}
+.status-panel-bottom{top:auto;right:15px;bottom:15px;}
+.status-card{background:var(--ui-bg-card);padding:10px;border-radius:8px;margin-bottom:6px;transition:all 0.2s;height:auto;box-sizing:border-box;}
+.display-group{display:flex;align-items:center;justify-content:space-between;}
+.adj-btn{width:20px;height:20px;background:#1a2a35;border:none;color:#fff;cursor:pointer;border-radius:4px;font-size:14px;}
+.status-value{font-size:24px;font-weight:900;text-align:center;flex:1;transition:color 0.2s;}
+.pause-card{cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.pause-card:hover{background:#1a2a35;}
+.pause-card.active{background:var(--ui-color1);}
+.pause-card.active .section-title{color:var(--ui-text-on-color1)!important;border-left-color:rgba(0,0,0,0.3);opacity:0.7;}
+.pause-card.active .pause-info{color:var(--ui-text-on-color1)!important;}
+.pause-info{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:900;color:#fff;margin-top:2px;}
+.offset-ctrl{display:flex;align-items:center;gap:4px;margin-top:4px;}
+.offset-btn{flex:1;height:24px;background:#1a2a35;border:none;color:#fff;cursor:pointer;border-radius:4px;font-size:14px;font-weight:bold;}
+.offset-display{flex:2;background:#000;font-size:11px;font-weight:bold;text-align:center;line-height:24px;border-radius:4px;cursor:pointer;transition:color 0.2s;}
+.beat-dots{display:flex;justify-content:center;margin-top:10px;flex-wrap:nowrap;align-items:flex-end;height:35px;width:100%;box-sizing:border-box;}
+.beat-item{display:flex;flex-direction:column;align-items:center;cursor:pointer;min-width:0;}
+.beat-checkbox{display:none;}
+.dot-box{width:22px;height:22px;border:1px solid #1a2a35;border-radius:3px;background:#050a10;transition:all 0.1s cubic-bezier(0.4,0,0.2,1);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:rgba(255,255,255,0.1);}
+.beat-checkbox:checked+.dot-box{border-color:#667788;color:#ffffff;background:#101a25;transform:translateY(-6px);}
+.dot-box.active{border-color:#ffffff!important;box-shadow:0 0 12px rgba(255,255,255,0.4);color:#ffffff!important;transform:translateY(-4px);}
+.beat-checkbox:checked+.dot-box.active{border-color:var(--ui-color1)!important;box-shadow:0 0 18px var(--ui-color1);color:var(--ui-text-on-color1)!important;background:var(--ui-color1)!important;transform:translateY(-12px);}
+.tap-card{cursor:pointer;padding:0!important;overflow:hidden;position:relative;height:54px;display:flex;align-items:center;justify-content:center;background:var(--ui-bg-card);}
+.tap-card:active,.tap-card.flash{background:#fff!important;}
+.tap-card-text{font-size:12px;font-weight:900;z-index:2;pointer-events:none;text-transform:uppercase;text-align:center;line-height:1.3;transition:color 0.2s;}
+.tap-sub-text{font-size:9px;opacity:0.7;display:block;margin-top:2px;}
+.tap-card.flash .tap-card-text{color:#000!important;}
+.tap-bar{position:absolute;bottom:0;left:0;height:4px;background:var(--color2);width:0%;z-index:1;pointer-events:none;transition:width 3s linear;}
+.visual-area{position:absolute;top:0;left:0;width:100%;height:100%;z-index:50;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+#drag-overlay{position:absolute;width:100%;height:100%;z-index:60;pointer-events:auto;cursor:move;}
+#capture-guide{position:fixed;inset:0;z-index:50;pointer-events:none;display:block;}
+#capture-guide-frame{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border:2px dashed rgba(255,255,255,0.75);border-radius:12px;box-shadow:0 0 0 1px rgba(0,0,0,0.35);}
+.rec-row{display:flex;gap:6px;align-items:center;margin-top:6px;}
+.rec-btn{width:100%;padding:6px;font-size:10px;background:#1a2a35;border:none;color:#eee;cursor:pointer;border-radius:6px;font-weight:900;}
+.rec-btn:hover{background:#2a3a45;}
+.rec-btn.recording{background:#7a1d1d;color:#fff;}
+.mini-label{font-size:8px;color:#8899aa;font-weight:900;text-transform:uppercase;letter-spacing:0.6px;}
+.mini-value{font-size:10px;color:#fff;font-weight:900;text-align:right;}
+</style>
+</head>
+<body>
+<div id="master-container">
+<div id="bg-image-layer" class="layer"></div>
+<div id="grid-canvas-container" class="layer"><canvas id="grid-canvas"></canvas></div>
+<div id="neon-glow" class="layer"></div>
+<canvas id="main-canvas"></canvas>
+<div id="capture-guide" aria-hidden="true"><div id="capture-guide-frame"></div></div>
+<div id="scanlines" class="layer"></div>
+<div id="vignette" class="layer"></div>
+</div>
+
+<div class="controls">
+<div class="app-header"><div class="app-logo">ZOOM ZOOM MAKER</div><div style="font-size:8px;color:#556677;margin-top:2px;">V1.61</div></div>
+<div class="ui-section">
+<div class="section-header"><span class="section-title">Main Visual</span></div>
+<select id="main-selector" class="select-style">
+<option value="image">Zoom Circle</option>
+<option value="square">Zoom Square</option>
+<option value="vertical">Zoom Rectangle</option>
+<option value="heartbeat" selected>Pulse Line</option>
+<option value="audiobars">Audio Bars</option>
+</select>
+<div class="btn-row">
+<button class="small-btn" onclick="document.getElementById('main-img-upload').click()">UPLOAD</button>
+<button class="small-btn danger" id="main-img-delete">DEL</button>
+</div>
+<input type="file" id="main-img-upload" accept="image/*" style="display:none;">
+<div class="label-group"><span class="label-text" id="size-label">Size</span></div>
+<input type="range" id="size-slider" min="50" max="1500" value="400">
+<div class="label-group"><span class="label-text" id="zoom-label">Image Zoom</span></div>
+<input type="range" id="main-zoom-slider" min="0.1" max="5.0" step="0.1" value="1.0">
+<div class="label-group"><span class="label-text">Intensity</span></div>
+<input type="range" id="intensity-slider" min="0.1" max="5.0" step="0.05" value="1.0">
+</div>
+<div class="ui-section">
+<div class="section-header"><span class="section-title">Background Visual</span></div>
+<div class="btn-row">
+<button class="small-btn" onclick="document.getElementById('bg-img-upload').click()">UPLOAD</button>
+<button class="small-btn danger" id="bg-img-delete">DEL</button>
+</div>
+<input type="file" id="bg-img-upload" accept="image/*" style="display:none;">
+<div class="label-group"><span class="label-text">BG Zoom</span></div>
+<input type="range" id="bg-zoom-slider" min="0.1" max="5.0" step="0.1" value="1.0">
+<div class="label-group"><span class="label-text">BG Opacity</span></div>
+<input type="range" id="bg-opacity-slider" min="0.0" max="1.0" step="0.05" value="0.6">
+</div>
+<div class="ui-section">
+<div class="section-header"><span class="section-title">Sub Effects</span></div>
+<div class="effects-grid">
+<div class="grid-full-row">
+<div style="display:flex; align-items:center; gap:8px; width:100%;">
+<label class="check-row" style="min-width:50px;"><input type="checkbox" id="check-grid" checked> Grid</label>
+<div class="grid-toggle-group">
+<input type="radio" name="gmode" id="g-sq" value="square" class="grid-radio" checked>
+<label for="g-sq" class="grid-label mode-btn">■</label>
+<input type="radio" name="gmode" id="g-hex" value="hexagon" class="grid-radio">
+<label for="g-hex" class="grid-label mode-btn">⬢</label>
+</div>
+<div class="grid-toggle-group">
+<input type="radio" name="gcolor" id="gc-1" value="c1" class="grid-radio" checked>
+<label for="gc-1" class="grid-label c1-btn">C1</label>
+<input type="radio" name="gcolor" id="gc-2" value="c2" class="grid-radio">
+<label for="gc-2" class="grid-label c2-btn">C2</label>
+</div>
+</div>
+<div style="display:flex; align-items:center; gap:8px; width:100%;">
+<label class="check-row" style="min-width:70px;" title="ビートの瞬間に加速する"><input type="checkbox" id="check-grid-beat" checked> Beat Accel</label>
+<span class="label-text" style="font-size:8px;">Speed</span>
+<input type="range" id="grid-speed-slider" min="0" max="1.0" step="0.01" value="0.15" style="flex:1; margin:0;">
+</div>
+</div>
+<label class="check-row"><input type="checkbox" id="check-particles"> Stars</label>
+<label class="check-row"><input type="checkbox" id="check-snow"> Snow</label>
+<label class="check-row"><input type="checkbox" id="check-noise"> Noise</label>
+<label class="check-row"><input type="checkbox" id="check-chromatic"> RGB</label>
+<label class="check-row"><input type="checkbox" id="check-scanlines"> Scanlines</label>
+<label class="check-row"><input type="checkbox" id="check-vintage"> Vintage</label>
+<label class="check-row"><input type="checkbox" id="check-vignette"> Vignette</label>
+<label class="check-row"><input type="checkbox" id="check-neon"> Fog</label>
+</div>
+</div>
+<div class="ui-section">
+<div class="section-header"><span class="section-title">Theme Colors</span></div>
+<div class="color-edit-area">
+<i data-lucide="palette" class="color-edit-icon" style="width:14px; height:14px;"></i>
+<div class="picker-wrapper" title="Custom C1"><input type="color" id="color1-picker" value="#00f2ff" class="color-input"></div>
+<div class="picker-wrapper" title="Custom C2"><input type="color" id="color2-picker" value="#ff00ff" class="color-input"></div>
+</div>
+<div class="preset-row">
+<div class="preset-btn" style="--p1:#00f2ff; --p2:#ff00ff;" onclick="applyPreset('#00f2ff', '#ff00ff')"></div>
+<div class="preset-btn" style="--p1:#0077ff; --p2:#ffcc00;" onclick="applyPreset('#0077ff', '#ffcc00')"></div>
+<div class="preset-btn" style="--p1:#ff3333; --p2:#ffffff;" onclick="applyPreset('#ff3333', '#ffffff')"></div>
+<div class="preset-btn" style="--p1:#000000; --p2:#ff0000;" onclick="applyPreset('#000000', '#ff0000')"></div>
+<div class="preset-btn" style="--p1:#ff8c00; --p2:#ff0080;" onclick="applyPreset('#ff8c00', '#ff0080')"></div>
+<div class="preset-btn" style="--p1:#a0feff; --p2:#0019ff;" onclick="applyPreset('#a0feff', '#0019ff')"></div>
+<div class="preset-btn" style="--p1:#ff66cc; --p2:#fff44f;" onclick="applyPreset('#ff66cc', '#fff44f')"></div>
+<div class="preset-btn" style="--p1:#00d2ff; --p2:#98ff98;" onclick="applyPreset('#00d2ff', '#98ff98')"></div>
+</div>
+</div>
+<div class="ui-section">
+<div class="section-header"><span class="section-title">Layout & Target</span></div>
+<select id="edit-target" class="select-style">
+<option value="main-v">1. Visual Position</option>
+<option value="main-img">2. Image Offset (Inside)</option>
+<option value="bg-img">3. Background Offset</option>
+</select>
+<div class="label-group"><span class="value-badge" id="pos-display" style="width:100%; text-align:center;">X: 0px, Y: 0px</span></div>
+<button class="small-btn" id="reset-pos" style="width:100%; margin-top:4px; font-size: 8px;">POSITION RESET (ALL)</button>
+</div>
+</div>
+
+<div class="status-panel status-panel-top">
+<div class="status-card pause-card" id="pause-card">
+<div class="section-header" style="border:none; padding:0; margin-bottom:4px;"><span class="section-title">PLAYBACK CONTROL</span></div>
+<div class="pause-info">
+<i data-lucide="pause" id="pause-icon" style="width:14px; height:14px;"></i>
+<span id="pause-text">PAUSE (P)</span>
+</div>
+</div>
+<div class="status-card" id="bpm-card">
+<div class="section-header"><span class="section-title">MASTER BPM</span></div>
+<div class="display-group">
+<button class="adj-btn" id="bpm-minus">-</button>
+<div class="status-value" id="disp-bpm">120</div>
+<button class="adj-btn" id="bpm-plus">+</button>
+</div>
+<input type="range" id="bpm-slider" min="40" max="250" value="120">
+<div class="label-group" style="margin-top:4px;"><span class="label-text" style="font-size:8px;">BEAT DELAY</span></div>
+<div class="offset-ctrl">
+<button class="offset-btn" id="offset-minus">−</button>
+<div class="offset-display" id="disp-offset" title="Double click to reset">0ms</div>
+<button class="offset-btn" id="offset-plus">+</button>
+</div>
+</div>
+<div class="status-card">
+<div class="section-header"><span class="section-title">BEAT PATTERN</span></div>
+<select id="loop-length-select" class="select-style" style="margin-top: 4px; margin-bottom: 4px;">
+<option value="3">3 (Waltz)</option>
+<option value="4" selected>4 (Common)</option>
+<option value="5">5 (Odd)</option>
+<option value="6">6 (Double Waltz)</option>
+<option value="7">7 (Odd)</option>
+<option value="8">8 (Double)</option>
+</select>
+<div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;">
+<span class="label-text" style="font-size:8px;">LOOP LENGTH</span>
+<button class="sync-trigger" id="sync-reset-btn" title="Reset to Beat 1">
+<i data-lucide="refresh-cw" id="reset-icon" style="width:10px; height:10px;"></i>
+</button>
+</div>
+<div class="beat-dots" id="beat-dots-container"></div>
+</div>
+<div class="status-card tap-card" id="tap-card">
+<div class="tap-card-text" id="tap-text">TAP SYNC<br><span class="tap-sub-text">(R-SHIFT)</span></div>
+<div class="tap-bar" id="tap-bar"></div>
+</div>
+</div>
+
+<div class="status-panel status-panel-bottom">
+<div class="status-card" id="rec-card">
+<div class="section-header"><span class="section-title">REC</span></div>
+<div class="label-group" style="margin-top:2px;">
+<span class="mini-label">Aspect</span>
+<select id="rec-aspect-select" class="select-style" style="width:90px; margin:0;">
+<option value="9:16" selected>9:16 縦長</option>
+<option value="1:1">1:1 正方形</option>
+<option value="16:9">16:9 横長</option>
+</select>
+</div>
+<div class="label-group" style="margin-top:6px;">
+<span class="mini-label">Beat Sync</span>
+<label class="check-row" style="margin:0;"><input type="checkbox" id="rec-beat-sync" checked></label>
+</div>
+<div class="label-group" style="margin-top:6px;">
+<span class="mini-label">Duration</span>
+<select id="rec-duration-select" class="select-style" style="width: 70px; margin: 0;">
+<option value="5000" selected>5s</option>
+<option value="10000">10s</option>
+<option value="15000">15s</option>
+<option value="20000">20s</option>
+<option value="25000">25s</option>
+<option value="30000">30s</option>
+<option value="manual">MANUAL</option>
+</select>
+</div>
+<div class="label-group" style="margin-top:6px;">
+<span class="mini-label">Status</span>
+<span class="mini-value" id="rec-status">IDLE</span>
+</div>
+<div class="rec-row">
+<button class="rec-btn" id="rec-toggle">START (R)</button>
+</div>
+</div>
+</div>
+
+<div class="visual-area"><div id="drag-overlay"></div></div>
+
+<script>
+lucide.createIcons();
+const root = document.documentElement;
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+const gCanvas = document.getElementById('grid-canvas');
+const gCtx = gCanvas.getContext('2d');
+let mainImage = null, bgImage = null;
+let mVX = 0, mVY = 0, mIX = 0, mIY = 0, bIX = 0, bIY = 0;
+let lastBeatTime = 0, beatCount = 0;
+let snowflakes = [], particles = [], barHeights = new Array(60).fill(0), pulseSeeds = [];
+let currentDelay = 0;
+let isPaused = false, pausedTime = 0, totalPausedMs = 0, loopLength = 4;
+let gridZOffset = 0;
+let lastDrawTime = Date.now();
+
+function updateCaptureGuide() {
+  const aspect = document.getElementById('rec-aspect-select').value;
+  const frame = document.getElementById('capture-guide-frame');
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const margin = 0.92;
+  let w, h;
+  if (aspect === '9:16') { h = Math.min(vh * margin, vw * margin * (16 / 9)); w = h * (9 / 16); }
+  else if (aspect === '1:1') { const side = Math.min(vw, vh) * margin; w = side; h = side; }
+  else { w = Math.min(vw * margin, vh * margin * (16 / 9)); h = w * (9 / 16); }
+  frame.style.width = w + 'px';
+  frame.style.height = h + 'px';
+}
+document.getElementById('rec-aspect-select').onchange = updateCaptureGuide;
+window.addEventListener('resize', updateCaptureGuide);
+updateCaptureGuide();
+
+function rebuildBeatUI() {
+  const container = document.getElementById('beat-dots-container');
+  loopLength = parseInt(document.getElementById('loop-length-select').value);
+  container.innerHTML = '';
+  const isFixed = loopLength <= 4;
+  const gap = isFixed ? 8 : (loopLength > 6 ? 3 : 5);
+  container.style.gap = `${gap}px`;
+  for (let i = 0; i < loopLength; i++) {
+    const label = document.createElement('label');
+    label.className = 'beat-item';
+    label.style.flex = isFixed ? "0 0 auto" : "1 1 0";
+    label.innerHTML = `<input type="checkbox" id="beat-${i}" class="beat-checkbox" checked><div class="dot-box" id="dot-${i}">${i + 1}</div>`;
+    container.appendChild(label);
+  }
+  beatCount = 0;
+  updateThemeColors(document.getElementById('color1-picker').value);
+}
+document.getElementById('loop-length-select').onchange = rebuildBeatUI;
+rebuildBeatUI();
+
+document.getElementById('sync-reset-btn').onclick = () => {
+  const effectiveNow = Date.now() - totalPausedMs;
+  lastBeatTime = effectiveNow - currentDelay;
+  beatCount = 0;
+  document.querySelectorAll('.dot-box').forEach((d, i) => d.classList.toggle('active', i === 0));
+};
+
+function togglePause() {
+  isPaused = !isPaused;
+  const card = document.getElementById('pause-card'), icon = document.getElementById('pause-icon'), text = document.getElementById('pause-text');
+  if (isPaused) { pausedTime = Date.now(); card.classList.add('active'); text.innerText = "PLAY (P)"; icon.setAttribute('data-lucide', 'play'); }
+  else { totalPausedMs += (Date.now() - pausedTime); card.classList.remove('active'); text.innerText = "PAUSE (P)"; icon.setAttribute('data-lucide', 'pause'); lastDrawTime = Date.now(); }
+  lucide.createIcons();
+}
+document.getElementById('pause-card').onclick = togglePause;
+
+function updateThemeColors(hex) {
+  root.style.setProperty('--color1', hex);
+  root.style.setProperty('--ui-color1', hex);
+  const r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+  const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+  const displayColor = yiq < 60 ? "#ffffff" : hex;
+  const contrastColor = (yiq < 128) ? "#ffffff" : "#000000";
+  root.style.setProperty('--ui-text-on-color1', contrastColor);
+  const bpmVal = document.getElementById('disp-bpm');
+  const tapTxt = document.getElementById('tap-text');
+  const delayVal = document.getElementById('disp-offset');
+  const resetIcon = document.getElementById('sync-reset-btn');
+  if (bpmVal) bpmVal.style.color = displayColor;
+  if (tapTxt) tapTxt.style.color = displayColor;
+  if (delayVal) delayVal.style.color = displayColor;
+  if (resetIcon) resetIcon.style.color = displayColor;
+}
+
+function applyPreset(c1, c2) {
+  document.getElementById('color1-picker').value = c1;
+  document.getElementById('color2-picker').value = c2;
+  updateThemeColors(c1);
+  root.style.setProperty('--color2', c2);
+}
+
+function createSnowflake() { return { x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: 1 + Math.random() * 3, speed: 0.5 + Math.random() * 1.5, swingOffset: Math.random() * Math.PI * 2, opacity: 0.3 + Math.random() * 0.5 }; }
+function createParticle() { const angle = Math.random() * Math.PI * 2, speed = 1 + Math.random() * 3; return { x: canvas.width/2 + mVX, y: canvas.height/2 + mVY, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed, life: 1.0, size: 1+Math.random()*3, color: Math.random()>0.5?document.getElementById('color1-picker').value:document.getElementById('color2-picker').value }; }
+
+function drawGrid(intensity, color1, color2) {
+  gCtx.clearRect(0, 0, gCanvas.width, gCanvas.height);
+  const mode = document.querySelector('input[name="gmode"]:checked').value;
+  const colorMode = document.querySelector('input[name="gcolor"]:checked').value;
+  const cx = gCanvas.width / 2, cy = gCanvas.height / 2, fov = 400, planeY = 200;
+  function project(x, z) { if (z < 1) return null; const scale = fov / z; return { x: cx + x * scale, y: cy + planeY * scale }; }
+  gCtx.beginPath();
+  if (mode === 'square') {
+    const step = 100, linesX = 30, linesZ = 50, visualZOffset = gridZOffset % step;
+    for (let i = -linesX; i <= linesX; i++) { const x = i * step; let started = false; for (let j = 1; j <= linesZ; j++) { const z = j * step - visualZOffset, p = project(x, z); if (p) { if (!started) { gCtx.moveTo(p.x, p.y); started = true; } else gCtx.lineTo(p.x, p.y); } } }
+    for (let j = 1; j <= linesZ; j++) { const z = j * step - visualZOffset; let started = false; for (let i = -linesX; i <= linesX; i++) { const p = project(i * step, z); if (p) { if (!started) { gCtx.moveTo(p.x, p.y); started = true; } else gCtx.lineTo(p.x, p.y); } } }
+  } else {
+    const r = 60, hW = r * Math.sqrt(3), hH = r * 1.5, linesX = 20, linesZ = 30, visualZOffset = gridZOffset % (hH * 2);
+    for (let j = 1; j <= linesZ; j++) { const zBase = j * hH - visualZOffset, off = (j % 2) * (hW / 2); for (let i = -linesX; i <= linesX; i++) { const xBase = i * hW + off; let pts = []; for (let k = 0; k < 6; k++) { const a = (Math.PI / 3) * k + (Math.PI / 6), x = xBase + r * Math.cos(a), z = zBase + r * Math.sin(a), p = project(x, z); if (p) pts.push(p); } if (pts.length === 6) { gCtx.moveTo(pts[0].x, pts[0].y); for (let k = 1; k < 6; k++) gCtx.lineTo(pts[k].x, pts[k].y); gCtx.lineTo(pts[0].x, pts[0].y); } } }
+  }
+  const grad = gCtx.createLinearGradient(0, cy, 0, gCanvas.height);
+  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(0.2, (colorMode === 'c1') ? color1 : color2);
+  grad.addColorStop(1, (colorMode === 'c1') ? color1 : color2);
+  gCtx.strokeStyle = grad; gCtx.lineWidth = 1.5 + (intensity * 2); gCtx.globalAlpha = 0.3 + intensity * 0.4; gCtx.stroke();
+  gCtx.globalAlpha = 1.0;
+}
+
+function updatePositions() {
+  root.style.setProperty('--main-v-x', `${mVX}px`); root.style.setProperty('--main-v-y', `${mVY}px`);
+  root.style.setProperty('--bg-img-x', `${bIX}px`); root.style.setProperty('--bg-img-y', `${bIY}px`);
+  const target = document.getElementById('edit-target').value, visualSize = parseFloat(document.getElementById('size-slider').value) * 0.5;
+  let dx, dy;
+  if (target === 'main-v') { dx = mVX; dy = mVY; } else if (target === 'main-img') { dx = mIX * visualSize; dy = mIY * visualSize; } else { dx = bIX; dy = bIY; }
+  document.getElementById('pos-display').innerText = `X: ${Math.round(dx)}px, Y: ${Math.round(dy)}px`;
+}
+
+let isDragging = false, lastX, lastY;
+document.getElementById('drag-overlay').onmousedown = (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; };
+window.onmousemove = (e) => {
+  if (!isDragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY, t = document.getElementById('edit-target').value, visualSize = parseFloat(document.getElementById('size-slider').value) * 0.5;
+  if(t==='main-v'){ mVX+=dx; mVY+=dy; } else if(t==='main-img'){ mIX += dx / visualSize; mIY += dy / visualSize; } else { bIX+=dx; bIY+=dy; }
+  updatePositions(); lastX=e.clientX; lastY=e.clientY;
+};
+window.onmouseup = () => isDragging = false;
+document.getElementById('reset-pos').onclick = () => { mVX=0; mVY=0; mIX=0; mIY=0; bIX=0; bIY=0; updatePositions(); };
+
+function updateBPM(v) {
+  const b = Math.min(Math.max(Math.round(v), 40), 250);
+  document.getElementById('bpm-slider').value = b;
+  document.getElementById('disp-bpm').innerText = b;
+  root.style.setProperty('--bpm', b);
+}
+document.getElementById('bpm-slider').oninput = (e) => updateBPM(e.target.value);
+document.getElementById('bpm-plus').onclick = () => updateBPM(parseInt(document.getElementById('bpm-slider').value) + 1);
+document.getElementById('bpm-minus').onclick = () => updateBPM(parseInt(document.getElementById('bpm-slider').value) - 1);
+
+function updateDelay(val) { currentDelay = Math.min(Math.max(val, -1000), 1000); document.getElementById('disp-offset').innerText = `${currentDelay}ms`; }
+document.getElementById('offset-plus').onclick = () => updateDelay(currentDelay + 50);
+document.getElementById('offset-minus').onclick = () => updateDelay(currentDelay - 50);
+document.getElementById('disp-offset').ondblclick = () => updateDelay(0);
+
+let tapTimes = [], lastTapTime = 0, tapTimeout = null;
+function handleTap(e) {
+  if(e) e.preventDefault();
+  const now = Date.now(), tapCard = document.getElementById('tap-card'), tapBar = document.getElementById('tap-bar'), tapText = document.getElementById('tap-text');
+  tapCard.classList.add('flash'); setTimeout(() => tapCard.classList.remove('flash'), 100);
+  clearTimeout(tapTimeout);
+  if (now - lastTapTime > 3000) { tapTimes = []; tapText.innerHTML = `TAPPING...<br><span class="tap-sub-text">(R-SHIFT)</span>`; }
+  lastTapTime = now; tapTimes.push(now);
+  if (tapTimes.length > 1) {
+    const intervals = []; for (let i = 1; i < tapTimes.length; i++) intervals.push(tapTimes[i] - tapTimes[i-1]);
+    updateBPM(60000 / (intervals.reduce((a, b) => a + b) / intervals.length));
+  }
+  tapBar.style.transition = 'none'; tapBar.style.width = '100%';
+  setTimeout(() => { tapBar.style.transition = 'width 3s linear'; tapBar.style.width = '0%'; }, 10);
+  tapTimeout = setTimeout(() => { tapTimes = []; tapText.innerHTML = `TAP SYNC<br><span class="tap-sub-text">(R-SHIFT)</span>`; }, 3000);
+}
+document.getElementById('tap-card').onmousedown = handleTap;
+
+function updateUIMode() {
+  const mode = document.getElementById('main-selector').value, zoomSlider = document.getElementById('main-zoom-slider'), zoomLabel = document.getElementById('zoom-label'), sizeLabel = document.getElementById('size-label');
+  if (mode === 'heartbeat') sizeLabel.innerText = "Density"; else if (mode === 'audiobars') sizeLabel.innerText = "Width"; else sizeLabel.innerText = "Size";
+  const enable = ['image', 'square', 'vertical', 'audiobars'].includes(mode) && mainImage !== null;
+  zoomSlider.disabled = !enable; zoomLabel.style.opacity = enable ? "1" : "0.2";
+}
+document.getElementById('main-img-upload').onchange = (e) => { const file = e.target.files[0]; if (file) { const url = URL.createObjectURL(file); mainImage = new Image(); mainImage.onload = updateUIMode; mainImage.src = url; } };
+document.getElementById('main-img-delete').onclick = () => { mainImage = null; document.getElementById('main-img-upload').value = ""; updateUIMode(); };
+document.getElementById('bg-img-upload').onchange = (e) => { const file = e.target.files[0]; if (file) { const url = URL.createObjectURL(file); bgImage = new Image(); bgImage.onload = () => { document.getElementById('bg-image-layer').style.backgroundImage = `url(${url})`; document.getElementById('bg-image-layer').style.display = 'block'; }; bgImage.src = url; } };
+document.getElementById('bg-img-delete').onclick = () => { bgImage = null; document.getElementById('bg-image-layer').style.display = 'none'; document.getElementById('bg-img-upload').value = ""; };
+document.getElementById('bg-opacity-slider').oninput = (e) => root.style.setProperty('--bg-opacity', e.target.value);
+document.getElementById('bg-zoom-slider').oninput = (e) => root.style.setProperty('--bg-img-scale', e.target.value);
+
+function resize() {
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  gCanvas.width = window.innerWidth; gCanvas.height = window.innerHeight;
+  snowflakes = Array.from({length: 100}, createSnowflake);
+  updateCaptureGuide();
+}
+window.onresize = resize; resize();
+
+// ===== FFmpeg v0.11系 =====
+let ffmpegInstance = null;
+let ffmpegLoaded = false;
+
+async function getFFmpeg() {
+  if (ffmpegLoaded) return ffmpegInstance;
+  console.log('[FFmpeg] createFFmpeg (v0.11)...');
+  const { createFFmpeg } = FFmpeg;
+  ffmpegInstance = createFFmpeg({ log: true });
+  console.log('[FFmpeg] load() 開始...');
+  await ffmpegInstance.load();
+  console.log('[FFmpeg] load() 完了！');
+  ffmpegLoaded = true;
+  return ffmpegInstance;
+}
+
+// ページ読み込み時にバックグラウンドでロード
+window.addEventListener('load', () => {
+  console.log('[FFmpeg] バックグラウンドロード開始...');
+  getFFmpeg()
+    .then(() => console.log('[FFmpeg] バックグラウンドロード完了 ✅'))
+    .catch(e => console.warn('[FFmpeg] バックグラウンドロード失敗:', e));
+});
+// ==========================
+
+let recShouldRun = false, recStopRequested = false, mediaRecorder = null;
+let recSegmentIndex = 0, recStartTimeout = null, recStopTimeout = null, recTimerTimeout = null;
+let recOffscreenCanvas = null, recOffscreenCtx = null;
+const elRecToggle = document.getElementById('rec-toggle');
+const elRecStatus = document.getElementById('rec-status');
+const elRecBeatSync = document.getElementById('rec-beat-sync');
+const elRecDuration = document.getElementById('rec-duration-select');
+
+function pickMimeType() {
+  const candidates = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  for (const t of candidates) { if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t; }
+  return '';
+}
+function setRecUI(state) {
+  elRecStatus.textContent = state;
+  if (['RECORDING','STARTING','STOPPING'].includes(state)) {
+    elRecToggle.classList.add('recording');
+    elRecToggle.textContent = 'STOP (R)';
+    elRecToggle.disabled = false;
+  } else if (state === 'CONVERTING') {
+    elRecToggle.classList.remove('recording');
+    elRecToggle.textContent = '変換中...';
+    elRecToggle.disabled = true;
+  } else {
+    elRecToggle.classList.remove('recording');
+    elRecToggle.textContent = 'START (R)';
+    elRecToggle.disabled = false;
+  }
+}
+function getBeatDurationMs() { return (60 / (parseFloat(root.style.getPropertyValue('--bpm')) || 120)) * 1000; }
+function msUntilNextBeat() {
+  const effectiveNow = Date.now() - totalPausedMs, beatDurationMs = getBeatDurationMs(), adjustedNow = effectiveNow - currentDelay;
+  const wait = (beatDurationMs - (adjustedNow % beatDurationMs)) % beatDurationMs;
+  return wait < 3 ? 0 : wait;
+}
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function stopSegmentNow() { if (!mediaRecorder || mediaRecorder.state !== 'recording') return; try { mediaRecorder.stop(); } catch (e) {} }
+
+function startSegmentNow() {
+  const aspectVal = document.getElementById('rec-aspect-select').value;
+
+  // ★ 固定高解像度（画面サイズに依存しない）
+  let recWidth, recHeight;
+  if (aspectVal === '9:16') {
+    recWidth = 1080; recHeight = 1920;
+  } else if (aspectVal === '1:1') {
+    recWidth = 1080; recHeight = 1080;
+  } else { // 16:9
+    recWidth = 1920; recHeight = 1080;
+  }
+
+  recOffscreenCanvas = document.createElement('canvas');
+  recOffscreenCanvas.width = recWidth; recOffscreenCanvas.height = recHeight;
+  recOffscreenCtx = recOffscreenCanvas.getContext('2d');
+  const stream = recOffscreenCanvas.captureStream(60);
+  const mimeType = pickMimeType();
+  const chunks = [];
+  try { mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined); }
+  catch (e) { recShouldRun = false; setRecUI('UNSUPPORTED'); alert('MediaRecorder Error'); return; }
+  mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+    const ts = new Date();
+    const stamp = `${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`;
+    const baseName = `zoomzoom_${stamp}_seg${String(recSegmentIndex).padStart(3,'0')}`;
+
+    try {
+      setRecUI('CONVERTING');
+      console.log('[FFmpeg] 変換開始...');
+
+      // ===== v0.11系 API =====
+      const { fetchFile } = FFmpeg;
+      const ffmpeg = await getFFmpeg();
+      console.log('[FFmpeg] writeFile...');
+      ffmpeg.FS('writeFile', 'input.webm', await fetchFile(blob));
+      console.log('[FFmpeg] run...');
+      await ffmpeg.run(
+        '-i', 'input.webm',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '20',
+        '-pix_fmt', 'yuv420p',
+        '-an',
+        '-movflags', '+faststart',
+        'output.mp4'
+      );
+      console.log('[FFmpeg] readFile...');
+      const data = ffmpeg.FS('readFile', 'output.mp4');
+      const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
+      // FS クリーンアップ
+      try { ffmpeg.FS('unlink', 'input.webm'); } catch(e) {}
+      try { ffmpeg.FS('unlink', 'output.mp4'); } catch(e) {}
+      // ======================
+
+      console.log('[FFmpeg] 変換成功！');
+      downloadBlob(mp4Blob, `${baseName}.mp4`);
+
+    } catch (e) {
+      console.warn('[FFmpeg] 失敗 → WebMで保存:', e);
+      downloadBlob(blob, `${baseName}.webm`);
+    }
+
+    recSegmentIndex += 1;
+    if (elRecDuration.value === 'manual' && recShouldRun && !recStopRequested) {
+      startSegmentNow();
+    } else {
+      recShouldRun = false;
+      recStopRequested = false;
+      setRecUI('IDLE');
+    }
+  };
+
+  mediaRecorder.start();
+  if (elRecDuration.value !== 'manual') {
+    recTimerTimeout = setTimeout(() => { if (recShouldRun) requestStopRecording(); }, parseInt(elRecDuration.value));
+  } else {
+    recTimerTimeout = setTimeout(() => {
+      if (recShouldRun) { alert('制限時間の8分に達したため自動停止しました。'); requestStopRecording(); }
+    }, 8 * 60 * 1000);
+  }
+}
+
+function requestStartRecording() {
+  if (recShouldRun) return;
+  recShouldRun = true; recStopRequested = false; recSegmentIndex = 0;
+  clearTimeout(recStartTimeout); clearTimeout(recStopTimeout); clearTimeout(recTimerTimeout);
+  if (elRecBeatSync.checked) { setRecUI('STARTING'); recStartTimeout = setTimeout(() => { if (!recShouldRun) return; setRecUI('RECORDING'); startSegmentNow(); }, msUntilNextBeat()); }
+  else { setRecUI('RECORDING'); startSegmentNow(); }
+}
+function requestStopRecording() {
+  if (!recShouldRun || recStopRequested) return;
+  recStopRequested = true;
+  clearTimeout(recStartTimeout); clearTimeout(recStopTimeout); clearTimeout(recTimerTimeout);
+  if (elRecBeatSync.checked) { setRecUI('STOPPING'); recStopTimeout = setTimeout(() => stopSegmentNow(), msUntilNextBeat()); }
+  else { setRecUI('STOPPING'); stopSegmentNow(); }
+}
+elRecToggle.onclick = () => { if (!recShouldRun) requestStartRecording(); else requestStopRecording(); };
+
+window.onkeydown = (e) => {
+  if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if(e.code === 'ShiftRight') handleTap(e);
+  if(e.code === 'KeyP') togglePause();
+  if(e.code === 'KeyR') { e.preventDefault(); if (!recShouldRun) requestStartRecording(); else requestStopRecording(); }
+};
+
+function draw() {
+  const nowReal = Date.now();
+  const deltaTime = nowReal - lastDrawTime;
+  lastDrawTime = nowReal;
+
+  if (document.getElementById('check-vintage').checked) { root.style.setProperty('--tint-sepia', '0.8'); root.style.setProperty('--tint-brightness', '0.9'); } else { root.style.setProperty('--tint-sepia', '0'); root.style.setProperty('--tint-brightness', '1'); }
+  const isCRT = document.getElementById('check-scanlines').checked;
+  document.getElementById('scanlines').style.display = isCRT ? 'block' : 'none';
+  root.style.setProperty('--crt-filter', isCRT ? 'contrast(1.4) brightness(1.15) saturate(1.1)' : 'none');
+  document.getElementById('neon-glow').style.display = document.getElementById('check-neon').checked ? 'block' : 'none';
+    document.getElementById('vignette').style.display = document.getElementById('check-vignette').checked ? 'block' : 'none';
+    document.getElementById('grid-canvas-container').style.display = document.getElementById('check-grid').checked ? 'block' : 'none';
+
+    if (!isPaused) {
+      const effectiveNow = nowReal - totalPausedMs;
+      const bpm = parseFloat(root.style.getPropertyValue('--bpm')) || 120, beatDurationMs = (60 / bpm) * 1000, adjustedNow = effectiveNow - currentDelay;
+      const color1 = document.getElementById('color1-picker').value, color2 = document.getElementById('color2-picker').value;
+      const intensityBase = parseFloat(document.getElementById('intensity-slider').value), visualSize = parseFloat(document.getElementById('size-slider').value) * 0.5;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (adjustedNow - lastBeatTime >= beatDurationMs) { lastBeatTime = adjustedNow - (adjustedNow % beatDurationMs); beatCount = (beatCount + 1) % loopLength; document.querySelectorAll('.dot-box').forEach((d, i) => d.classList.toggle('active', i === beatCount)); }
+
+      const visualProgress = (adjustedNow % beatDurationMs) / beatDurationMs;
+      const currentBeatCheckbox = document.getElementById(`beat-${beatCount}`);
+      const currentBeatEnabled = currentBeatCheckbox ? currentBeatCheckbox.checked : false;
+      const intensity = (currentBeatEnabled && visualProgress < 0.2) ? Math.sin((visualProgress / 0.2) * Math.PI) : 0;
+      const vBeatStart = Math.floor(adjustedNow / beatDurationMs);
+
+      if (this.lastVBeat !== vBeatStart) { this.lastVBeat = vBeatStart; if (currentBeatEnabled) { pulseSeeds = Array.from({length: 15}, () => ({ pos: Math.random(), height: 0.8+Math.random(), dir: Math.random()>0.5?1:-1 })); if (document.getElementById('check-particles').checked) for(let i=0; i<25; i++) particles.push(createParticle()); } }
+      for (let i = 0; i < 60; i++) { if (vBeatStart !== this.lastVBeatUpdate && currentBeatEnabled) barHeights[i] = (0.2 + Math.random() * 0.8); barHeights[i] *= 0.92; }
+      this.lastVBeatUpdate = vBeatStart;
+
+      const baseSpeed = parseFloat(document.getElementById('grid-speed-slider').value);
+      let currentSpeed = baseSpeed;
+      if (document.getElementById('check-grid-beat').checked && currentBeatEnabled) currentSpeed += baseSpeed * (intensity * 4);
+      gridZOffset += currentSpeed * deltaTime;
+
+      if (document.getElementById('check-grid').checked) drawGrid(intensity, color1, color2);
+
+      if (document.getElementById('check-particles').checked) { ctx.save(); particles.forEach((p, i) => { p.x += p.vx * (1 + intensity * intensityBase); p.y += p.vy * (1 + intensity * intensityBase); p.life -= 0.01; if (p.life <= 0) particles.splice(i, 1); ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }); ctx.restore(); }
+      if (document.getElementById('check-snow').checked) { ctx.save(); snowflakes.forEach(s => { s.y += s.speed - (intensity * 1.5); s.x += Math.sin(nowReal * 0.001 + s.swingOffset) * 0.5; if (s.y > canvas.height) { s.y = -10; s.x = Math.random() * canvas.width; } ctx.beginPath(); ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`; ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); }); ctx.restore(); }
+
+      const renderWithSelectiveRGB = (drawFunc) => {
+        const isRGB = document.getElementById('check-chromatic').checked && intensity > 0;
+        if (isRGB) {
+          const split = (intensity * 20) * intensityBase;
+          ctx.save(); ctx.globalCompositeOperation = 'screen';
+          ctx.save(); ctx.translate(split, 0); drawFunc('#ff0000', '#ff0000', false); ctx.restore();
+          ctx.save(); ctx.translate(-split, 0); drawFunc('#0000ff', '#0000ff', false); ctx.restore();
+          ctx.restore();
+          drawFunc(color1, color2, true);
+        } else {
+          drawFunc(color1, color2, true);
+        }
+      };
+
+      renderWithSelectiveRGB((c1, c2, isFinal) => {
+        ctx.save(); ctx.translate(canvas.width/2 + mVX, canvas.height/2 + mVY);
+        const mainMode = document.getElementById('main-selector').value;
+        if (intensity > 0 && mainMode !== 'audiobars') { ctx.translate((Math.random()-0.5)*intensity*8, (Math.random()-0.5)*intensity*8); }
+
+        if (['image', 'square', 'vertical'].includes(mainMode)) {
+          const size = visualSize * (1 + intensity * 0.2 * intensityBase), rectW = mainMode === 'vertical' ? size * 0.56 : size, rectH = size;
+          if (isFinal && mainImage) {
+            ctx.save();
+            if (mainMode === 'image') { ctx.beginPath(); ctx.arc(0, 0, size/2, 0, Math.PI*2); ctx.clip(); }
+            else { ctx.beginPath(); ctx.rect(-rectW/2, -rectH/2, rectW, rectH); ctx.clip(); }
+            const s = parseFloat(document.getElementById('main-zoom-slider').value);
+            const imgAspect = mainImage.width / mainImage.height;
+            const frameAspect = rectW / rectH;
+            let drawW, drawH;
+            if (imgAspect > frameAspect) { drawH = rectH * s; drawW = drawH * imgAspect; }
+            else { drawW = rectW * s; drawH = drawW / imgAspect; }
+            ctx.drawImage(mainImage, -drawW/2 + mIX * visualSize, -drawH/2 + mIY * visualSize, drawW, drawH);
+            ctx.restore();
+          }
+          for(let i=0; i<3; i++) {
+            let p = (visualProgress - i * 0.2); if (p < 0) p += 1;
+            ctx.save(); ctx.strokeStyle = c2; ctx.lineWidth = 2; ctx.globalAlpha = (1 - p) * 0.8;
+            const rs = 1 + p * 3.5 * intensityBase;
+            if (mainMode === 'image') { ctx.beginPath(); ctx.arc(0, 0, (size/2)*rs, 0, Math.PI*2); ctx.stroke(); }
+            else { ctx.strokeRect(-(rectW/2)*rs, -(rectH/2)*rs, rectW*rs, rectH*rs); }
+            ctx.restore();
+          }
+          ctx.save();
+          const sizeScale = (visualSize / 200);
+          const glowBase = 10 * sizeScale;
+          const glowIntensity = glowBase + (intensity * 40 * sizeScale * intensityBase);
+          ctx.shadowBlur = glowIntensity; ctx.shadowColor = c1; ctx.strokeStyle = c1; ctx.lineWidth = 2 + (4 * sizeScale);
+          if (mainMode === 'image') { ctx.beginPath(); ctx.arc(0, 0, size/2, 0, Math.PI*2); ctx.stroke(); }
+          else { ctx.strokeRect(-rectW/2, -rectH/2, rectW, rectH); }
+          ctx.shadowBlur = glowIntensity / 4; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1 + (1 * sizeScale); ctx.globalAlpha = 0.7 + (intensity * 0.3);
+          if (mainMode === 'image') { ctx.beginPath(); ctx.arc(0, 0, size/2, 0, Math.PI*2); ctx.stroke(); }
+          else { ctx.strokeRect(-rectW/2, -rectH/2, rectW, rectH); }
+          ctx.restore();
+
+        } else if (mainMode === 'heartbeat') {
+          const startX = -visualSize;
+          ctx.beginPath(); ctx.lineWidth = 3; ctx.strokeStyle = c2; ctx.globalAlpha = 0.6;
+          for(let i=0; i<=150; i++) { let x = startX + (i/150)*visualSize*2, y = 0; pulseSeeds.forEach(s => { let d = Math.abs(i/150 - s.pos); if(d < 0.12) y += s.height * s.dir * intensity * 50 * intensityBase * Math.cos((d/0.12)*(Math.PI/2)); }); y += Math.sin(i * 0.1 + adjustedNow * 0.012) * 8; i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y); }
+          ctx.stroke();
+          ctx.beginPath(); ctx.lineWidth = 4; ctx.strokeStyle = c1; ctx.globalAlpha = 1.0;
+          for(let i=0; i<=150; i++) { let x = startX + (i/150)*visualSize*2, y = 0; pulseSeeds.forEach(s => { let d = Math.abs(i/150 - s.pos); if(d < 0.1) y += s.height * s.dir * intensity * 60 * intensityBase * Math.cos((d/0.1)*(Math.PI/2)); }); y += Math.sin(i * 0.1 + adjustedNow * 0.01) * 5; i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y); }
+          ctx.stroke();
+
+        } else if (mainMode === 'audiobars') {
+          const barCount = 60, spacing = (visualSize*2) / barCount, barWidth = Math.max(1, spacing * 0.8), barMaxH = (canvas.height * 0.4) * intensityBase, startX = -visualSize;
+          for (let i = 0; i < barCount; i++) {
+            const h = barHeights[i] * barMaxH, bx = startX + i * spacing, by = -h/2;
+            if (isFinal && mainImage) {
+              const s = parseFloat(document.getElementById('main-zoom-slider').value);
+              const imgAspect = mainImage.width / mainImage.height;
+              const totalW = visualSize * 2, totalH = canvas.height * 0.4;
+              let drawW, drawH;
+              if (imgAspect > totalW / totalH) { drawH = totalH * s; drawW = drawH * imgAspect; }
+              else { drawW = totalW * s; drawH = drawW / imgAspect; }
+              const imgX = -drawW/2 + mIX * visualSize, imgY = -drawH/2 + mIY * visualSize;
+              ctx.save(); ctx.beginPath(); ctx.rect(bx, by, barWidth, h); ctx.clip();
+              ctx.drawImage(mainImage, imgX, imgY, drawW, drawH);
+              ctx.restore();
+            } else {
+              const grad = ctx.createLinearGradient(0, -barMaxH/2, 0, barMaxH/2);
+              grad.addColorStop(0, c1); grad.addColorStop(0.3, c1); grad.addColorStop(0.7, c2); grad.addColorStop(1, c2);
+              ctx.fillStyle = grad; ctx.fillRect(bx, by, barWidth, h);
+            }
+          }
+        }
+        ctx.restore();
+      });
+
+      if (document.getElementById('check-noise').checked && (intensity > 0.05 || Math.random() > 0.97)) {
+        ctx.save(); ctx.globalCompositeOperation = 'overlay';
+        ctx.fillStyle = `rgba(255,255,255,${0.2 + intensity * 0.5})`;
+        for(let i=0; i<10; i++) { ctx.fillRect(0, Math.random() * canvas.height, canvas.width, Math.random() * 5 + 1); }
+        ctx.restore();
+      }
+
+      if (recOffscreenCanvas && recOffscreenCtx && mediaRecorder && mediaRecorder.state === 'recording') {
+        const recWidth = recOffscreenCanvas.width, recHeight = recOffscreenCanvas.height;
+        const guideFrame = document.getElementById('capture-guide-frame');
+        const rect = guideFrame.getBoundingClientRect();
+        const srcX = rect.left, srcY = rect.top, srcW = rect.width, srcH = rect.height;
+        const isVintage = document.getElementById('check-vintage').checked;
+        const isCRT2 = document.getElementById('check-scanlines').checked;
+
+        recOffscreenCtx.save();
+        recOffscreenCtx.fillStyle = '#000000';
+        recOffscreenCtx.fillRect(0, 0, recWidth, recHeight);
+
+        if (isVintage) recOffscreenCtx.filter = 'sepia(0.8) brightness(0.9)';
+
+        if (bgImage && document.getElementById('bg-image-layer').style.display !== 'none') {
+          recOffscreenCtx.save();
+          recOffscreenCtx.globalAlpha = parseFloat(document.getElementById('bg-opacity-slider').value);
+          const bgScale = parseFloat(document.getElementById('bg-zoom-slider').value);
+          const imgAspect = bgImage.width / bgImage.height, recAspect = recWidth / recHeight;
+          let drawW, drawH;
+          if (imgAspect > recAspect) { drawH = recHeight * bgScale; drawW = drawH * imgAspect; }
+          else { drawW = recWidth * bgScale; drawH = drawW / imgAspect; }
+          recOffscreenCtx.translate(recWidth/2 + bIX, recHeight/2 + bIY);
+          recOffscreenCtx.drawImage(bgImage, -drawW/2, -drawH/2, drawW, drawH);
+          recOffscreenCtx.restore();
+        }
+
+        if (document.getElementById('check-grid').checked) {
+          recOffscreenCtx.drawImage(gCanvas, srcX, srcY, srcW, srcH, 0, 0, recWidth, recHeight);
+        }
+
+        if (document.getElementById('check-neon').checked) {
+          recOffscreenCtx.save();
+          recOffscreenCtx.globalCompositeOperation = 'screen';
+          recOffscreenCtx.globalAlpha = 0.4;
+          const c1 = document.getElementById('color1-picker').value;
+          const c2 = document.getElementById('color2-picker').value;
+          const drawGlow = (x, y, color) => {
+            const grad = recOffscreenCtx.createRadialGradient(x, y, 0, x, y, recWidth * 0.8);
+            grad.addColorStop(0, color); grad.addColorStop(1, 'transparent');
+            recOffscreenCtx.fillStyle = grad; recOffscreenCtx.fillRect(0, 0, recWidth, recHeight);
+          };
+          drawGlow(recWidth*0.3, recHeight*0.3, c2); drawGlow(recWidth*0.7, recHeight*0.3, c1);
+          drawGlow(recWidth*0.3, recHeight*0.7, c1); drawGlow(recWidth*0.7, recHeight*0.7, c2);
+          recOffscreenCtx.restore();
+        }
+
+        recOffscreenCtx.save();
+        if (isCRT2) recOffscreenCtx.filter = (isVintage ? 'sepia(0.8) brightness(0.9) ' : '') + 'contrast(1.4) brightness(1.15) saturate(1.1)';
+        recOffscreenCtx.drawImage(canvas, srcX, srcY, srcW, srcH, 0, 0, recWidth, recHeight);
+        recOffscreenCtx.restore();
+
+        if (isCRT2) {
+          recOffscreenCtx.save();
+          recOffscreenCtx.fillStyle = 'rgba(0,0,0,0.3)';
+          for(let y=0; y<recHeight; y+=4) recOffscreenCtx.fillRect(0, y, recWidth, 2);
+          recOffscreenCtx.restore();
+        }
+
+        if (document.getElementById('check-vignette').checked) {
+          recOffscreenCtx.save();
+          const cx = recWidth/2 + mVX, cy = recHeight/2 + mVY;
+          const grad = recOffscreenCtx.createRadialGradient(cx, cy, recWidth*0.2, cx, cy, recWidth*0.8);
+          grad.addColorStop(0, 'transparent'); grad.addColorStop(0.5, 'rgba(0,0,0,0.5)'); grad.addColorStop(1, '#000');
+          recOffscreenCtx.fillStyle = grad; recOffscreenCtx.fillRect(0, 0, recWidth, recHeight);
+          recOffscreenCtx.restore();
+        }
+
+        recOffscreenCtx.restore();
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  draw();
+  document.getElementById('main-selector').onchange = updateUIMode;
+  document.getElementById('size-slider').oninput = (e) => { root.style.setProperty('--base-size', `${e.target.value}px`); updatePositions(); };
+  document.getElementById('edit-target').onchange = updatePositions;
+  document.getElementById('color1-picker').oninput = (e) => updateThemeColors(e.target.value);
+  document.getElementById('color2-picker').oninput = (e) => root.style.setProperty('--color2', e.target.value);
+  updateThemeColors(document.getElementById('color1-picker').value);
+  updateUIMode();
+  setRecUI('IDLE');
+  </script>
+  </body>
+  </html>
