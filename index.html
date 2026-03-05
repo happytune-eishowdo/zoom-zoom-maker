@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Zoom Zoom Maker V1.61</title>
+<title>Zoom Zoom Maker V1.81</title>
 <script src="https://unpkg.com/lucide@latest"></script>
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
@@ -104,7 +104,7 @@ input[type="range"]{width:100%;margin-top:-4px;margin-bottom:6px;accent-color:va
 </div>
 
 <div class="controls">
-<div class="app-header"><div class="app-logo">ZOOM ZOOM MAKER</div><div style="font-size:8px;color:#556677;margin-top:2px;">V1.61</div></div>
+<div class="app-header"><div class="app-logo">ZOOM ZOOM MAKER</div><div style="font-size:8px;color:#556677;margin-top:2px;">V1.81</div></div>
 <div class="ui-section">
 <div class="section-header"><span class="section-title">Main Visual</span></div>
 <select id="main-selector" class="select-style">
@@ -488,27 +488,21 @@ let ffmpegLoaded = false;
 
 async function getFFmpeg() {
   if (ffmpegLoaded) return ffmpegInstance;
-  console.log('[FFmpeg] createFFmpeg (v0.11)...');
   const { createFFmpeg } = FFmpeg;
   ffmpegInstance = createFFmpeg({ log: true });
-  console.log('[FFmpeg] load() 開始...');
   await ffmpegInstance.load();
-  console.log('[FFmpeg] load() 完了！');
   ffmpegLoaded = true;
   return ffmpegInstance;
 }
 
-// ページ読み込み時にバックグラウンドでロード
 window.addEventListener('load', () => {
-  console.log('[FFmpeg] バックグラウンドロード開始...');
-  getFFmpeg()
-    .then(() => console.log('[FFmpeg] バックグラウンドロード完了 ✅'))
-    .catch(e => console.warn('[FFmpeg] バックグラウンドロード失敗:', e));
+  getFFmpeg().catch(e => console.warn('[FFmpeg] Load Error:', e));
 });
 // ==========================
 
 let recShouldRun = false, recStopRequested = false, mediaRecorder = null;
-let recSegmentIndex = 0, recStartTimeout = null, recStopTimeout = null, recTimerTimeout = null;
+let isWaitingToStart = false, isWaitingToStop = false;
+let recSegmentIndex = 0, recStartTime = 0;
 let recOffscreenCanvas = null, recOffscreenCtx = null;
 const elRecToggle = document.getElementById('rec-toggle');
 const elRecStatus = document.getElementById('rec-status');
@@ -522,7 +516,7 @@ function pickMimeType() {
 }
 function setRecUI(state) {
   elRecStatus.textContent = state;
-  if (['RECORDING','STARTING','STOPPING'].includes(state)) {
+  if (['RECORDING','WAITING','STOPPING'].includes(state)) {
     elRecToggle.classList.add('recording');
     elRecToggle.textContent = 'STOP (R)';
     elRecToggle.disabled = false;
@@ -536,31 +530,19 @@ function setRecUI(state) {
     elRecToggle.disabled = false;
   }
 }
-function getBeatDurationMs() { return (60 / (parseFloat(root.style.getPropertyValue('--bpm')) || 120)) * 1000; }
-function msUntilNextBeat() {
-  const effectiveNow = Date.now() - totalPausedMs, beatDurationMs = getBeatDurationMs(), adjustedNow = effectiveNow - currentDelay;
-  const wait = (beatDurationMs - (adjustedNow % beatDurationMs)) % beatDurationMs;
-  return wait < 3 ? 0 : wait;
-}
+
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function stopSegmentNow() { if (!mediaRecorder || mediaRecorder.state !== 'recording') return; try { mediaRecorder.stop(); } catch (e) {} }
 
-function startSegmentNow() {
+function startActualRecording() {
   const aspectVal = document.getElementById('rec-aspect-select').value;
-
-  // ★ 固定高解像度（画面サイズに依存しない）
   let recWidth, recHeight;
-  if (aspectVal === '9:16') {
-    recWidth = 1080; recHeight = 1920;
-  } else if (aspectVal === '1:1') {
-    recWidth = 1080; recHeight = 1080;
-  } else { // 16:9
-    recWidth = 1920; recHeight = 1080;
-  }
+  if (aspectVal === '9:16') { recWidth = 1080; recHeight = 1920; } 
+  else if (aspectVal === '1:1') { recWidth = 1080; recHeight = 1080; } 
+  else { recWidth = 1920; recHeight = 1080; }
 
   recOffscreenCanvas = document.createElement('canvas');
   recOffscreenCanvas.width = recWidth; recOffscreenCanvas.height = recHeight;
@@ -569,86 +551,58 @@ function startSegmentNow() {
   const mimeType = pickMimeType();
   const chunks = [];
   try { mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined); }
-  catch (e) { recShouldRun = false; setRecUI('UNSUPPORTED'); alert('MediaRecorder Error'); return; }
+  catch (e) { recShouldRun = false; setRecUI('UNSUPPORTED'); return; }
+  
   mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
-
   mediaRecorder.onstop = async () => {
     const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
     const ts = new Date();
     const stamp = `${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`;
     const baseName = `zoomzoom_${stamp}_seg${String(recSegmentIndex).padStart(3,'0')}`;
-
     try {
       setRecUI('CONVERTING');
-      console.log('[FFmpeg] 変換開始...');
-
-      // ===== v0.11系 API =====
       const { fetchFile } = FFmpeg;
       const ffmpeg = await getFFmpeg();
-      console.log('[FFmpeg] writeFile...');
       ffmpeg.FS('writeFile', 'input.webm', await fetchFile(blob));
-      console.log('[FFmpeg] run...');
-      await ffmpeg.run(
-        '-i', 'input.webm',
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-crf', '20',
-        '-pix_fmt', 'yuv420p',
-        '-an',
-        '-movflags', '+faststart',
-        'output.mp4'
-      );
-      console.log('[FFmpeg] readFile...');
+      await ffmpeg.run('-i', 'input.webm', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-an', '-movflags', '+faststart', 'output.mp4');
       const data = ffmpeg.FS('readFile', 'output.mp4');
       const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
-      // FS クリーンアップ
-      try { ffmpeg.FS('unlink', 'input.webm'); } catch(e) {}
-      try { ffmpeg.FS('unlink', 'output.mp4'); } catch(e) {}
-      // ======================
-
-      console.log('[FFmpeg] 変換成功！');
+      try { ffmpeg.FS('unlink', 'input.webm'); ffmpeg.FS('unlink', 'output.mp4'); } catch(e) {}
       downloadBlob(mp4Blob, `${baseName}.mp4`);
-
     } catch (e) {
-      console.warn('[FFmpeg] 失敗 → WebMで保存:', e);
       downloadBlob(blob, `${baseName}.webm`);
     }
-
     recSegmentIndex += 1;
-    if (elRecDuration.value === 'manual' && recShouldRun && !recStopRequested) {
-      startSegmentNow();
-    } else {
-      recShouldRun = false;
-      recStopRequested = false;
-      setRecUI('IDLE');
-    }
+    recShouldRun = false;
+    setRecUI('IDLE');
   };
 
+  recStartTime = Date.now();
   mediaRecorder.start();
-  if (elRecDuration.value !== 'manual') {
-    recTimerTimeout = setTimeout(() => { if (recShouldRun) requestStopRecording(); }, parseInt(elRecDuration.value));
-  } else {
-    recTimerTimeout = setTimeout(() => {
-      if (recShouldRun) { alert('制限時間の8分に達したため自動停止しました。'); requestStopRecording(); }
-    }, 8 * 60 * 1000);
-  }
+  setRecUI('RECORDING');
 }
 
 function requestStartRecording() {
   if (recShouldRun) return;
-  recShouldRun = true; recStopRequested = false; recSegmentIndex = 0;
-  clearTimeout(recStartTimeout); clearTimeout(recStopTimeout); clearTimeout(recTimerTimeout);
-  if (elRecBeatSync.checked) { setRecUI('STARTING'); recStartTimeout = setTimeout(() => { if (!recShouldRun) return; setRecUI('RECORDING'); startSegmentNow(); }, msUntilNextBeat()); }
-  else { setRecUI('RECORDING'); startSegmentNow(); }
+  recShouldRun = true;
+  if (elRecBeatSync.checked) {
+    isWaitingToStart = true;
+    setRecUI('WAITING');
+  } else {
+    startActualRecording();
+  }
 }
+
 function requestStopRecording() {
-  if (!recShouldRun || recStopRequested) return;
-  recStopRequested = true;
-  clearTimeout(recStartTimeout); clearTimeout(recStopTimeout); clearTimeout(recTimerTimeout);
-  if (elRecBeatSync.checked) { setRecUI('STOPPING'); recStopTimeout = setTimeout(() => stopSegmentNow(), msUntilNextBeat()); }
-  else { setRecUI('STOPPING'); stopSegmentNow(); }
+  if (!recShouldRun || isWaitingToStop) return;
+  if (elRecBeatSync.checked) {
+    isWaitingToStop = true;
+    setRecUI('STOPPING');
+  } else {
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  }
 }
+
 elRecToggle.onclick = () => { if (!recShouldRun) requestStartRecording(); else requestStopRecording(); };
 
 window.onkeydown = (e) => {
@@ -668,54 +622,76 @@ function draw() {
   document.getElementById('scanlines').style.display = isCRT ? 'block' : 'none';
   root.style.setProperty('--crt-filter', isCRT ? 'contrast(1.4) brightness(1.15) saturate(1.1)' : 'none');
   document.getElementById('neon-glow').style.display = document.getElementById('check-neon').checked ? 'block' : 'none';
-    document.getElementById('vignette').style.display = document.getElementById('check-vignette').checked ? 'block' : 'none';
-    document.getElementById('grid-canvas-container').style.display = document.getElementById('check-grid').checked ? 'block' : 'none';
+  document.getElementById('vignette').style.display = document.getElementById('check-vignette').checked ? 'block' : 'none';
+  document.getElementById('grid-canvas-container').style.display = document.getElementById('check-grid').checked ? 'block' : 'none';
 
-    if (!isPaused) {
-      const effectiveNow = nowReal - totalPausedMs;
-      const bpm = parseFloat(root.style.getPropertyValue('--bpm')) || 120, beatDurationMs = (60 / bpm) * 1000, adjustedNow = effectiveNow - currentDelay;
-      const color1 = document.getElementById('color1-picker').value, color2 = document.getElementById('color2-picker').value;
-      const intensityBase = parseFloat(document.getElementById('intensity-slider').value), visualSize = parseFloat(document.getElementById('size-slider').value) * 0.5;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!isPaused) {
+    const effectiveNow = nowReal - totalPausedMs;
+    const bpm = parseFloat(root.style.getPropertyValue('--bpm')) || 120, beatDurationMs = (60 / bpm) * 1000, adjustedNow = effectiveNow - currentDelay;
+    const color1 = document.getElementById('color1-picker').value, color2 = document.getElementById('color2-picker').value;
+    const intensityBase = parseFloat(document.getElementById('intensity-slider').value), visualSize = parseFloat(document.getElementById('size-slider').value) * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (adjustedNow - lastBeatTime >= beatDurationMs) { lastBeatTime = adjustedNow - (adjustedNow % beatDurationMs); beatCount = (beatCount + 1) % loopLength; document.querySelectorAll('.dot-box').forEach((d, i) => d.classList.toggle('active', i === beatCount)); }
+    if (adjustedNow - lastBeatTime >= beatDurationMs) { 
+      lastBeatTime = adjustedNow - (adjustedNow % beatDurationMs); 
+      beatCount = (beatCount + 1) % loopLength; 
+      document.querySelectorAll('.dot-box').forEach((d, i) => d.classList.toggle('active', i === beatCount)); 
+      
+      // Beat Sync Logic
+      if (isWaitingToStart && beatCount === 0) {
+        isWaitingToStart = false;
+        startActualRecording();
+      }
+      if (isWaitingToStop && beatCount === 0) {
+        isWaitingToStop = false;
+        if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      }
+    }
 
-      const visualProgress = (adjustedNow % beatDurationMs) / beatDurationMs;
-      const currentBeatCheckbox = document.getElementById(`beat-${beatCount}`);
-      const currentBeatEnabled = currentBeatCheckbox ? currentBeatCheckbox.checked : false;
-      const intensity = (currentBeatEnabled && visualProgress < 0.2) ? Math.sin((visualProgress / 0.2) * Math.PI) : 0;
-      const vBeatStart = Math.floor(adjustedNow / beatDurationMs);
+    // Auto Duration Stop Logic
+    if (recShouldRun && !isWaitingToStart && !isWaitingToStop && elRecDuration.value !== 'manual') {
+      const elapsed = nowReal - recStartTime;
+      if (elapsed >= parseInt(elRecDuration.value)) {
+        requestStopRecording();
+      }
+    }
 
-      if (this.lastVBeat !== vBeatStart) { this.lastVBeat = vBeatStart; if (currentBeatEnabled) { pulseSeeds = Array.from({length: 15}, () => ({ pos: Math.random(), height: 0.8+Math.random(), dir: Math.random()>0.5?1:-1 })); if (document.getElementById('check-particles').checked) for(let i=0; i<25; i++) particles.push(createParticle()); } }
-      for (let i = 0; i < 60; i++) { if (vBeatStart !== this.lastVBeatUpdate && currentBeatEnabled) barHeights[i] = (0.2 + Math.random() * 0.8); barHeights[i] *= 0.92; }
-      this.lastVBeatUpdate = vBeatStart;
+    const visualProgress = (adjustedNow % beatDurationMs) / beatDurationMs;
+    const currentBeatCheckbox = document.getElementById(`beat-${beatCount}`);
+    const currentBeatEnabled = currentBeatCheckbox ? currentBeatCheckbox.checked : false;
+    const intensity = (currentBeatEnabled && visualProgress < 0.2) ? Math.sin((visualProgress / 0.2) * Math.PI) : 0;
+    const vBeatStart = Math.floor(adjustedNow / beatDurationMs);
 
-      const baseSpeed = parseFloat(document.getElementById('grid-speed-slider').value);
-      let currentSpeed = baseSpeed;
-      if (document.getElementById('check-grid-beat').checked && currentBeatEnabled) currentSpeed += baseSpeed * (intensity * 4);
-      gridZOffset += currentSpeed * deltaTime;
+    if (this.lastVBeat !== vBeatStart) { this.lastVBeat = vBeatStart; if (currentBeatEnabled) { pulseSeeds = Array.from({length: 15}, () => ({ pos: Math.random(), height: 0.8+Math.random(), dir: Math.random()>0.5?1:-1 })); if (document.getElementById('check-particles').checked) for(let i=0; i<25; i++) particles.push(createParticle()); } }
+    for (let i = 0; i < 60; i++) { if (vBeatStart !== this.lastVBeatUpdate && currentBeatEnabled) barHeights[i] = (0.2 + Math.random() * 0.8); barHeights[i] *= 0.92; }
+    this.lastVBeatUpdate = vBeatStart;
 
-      if (document.getElementById('check-grid').checked) drawGrid(intensity, color1, color2);
+    const baseSpeed = parseFloat(document.getElementById('grid-speed-slider').value);
+    let currentSpeed = baseSpeed;
+    if (document.getElementById('check-grid-beat').checked && currentBeatEnabled) currentSpeed += baseSpeed * (intensity * 4);
+    gridZOffset += currentSpeed * deltaTime;
 
-      if (document.getElementById('check-particles').checked) { ctx.save(); particles.forEach((p, i) => { p.x += p.vx * (1 + intensity * intensityBase); p.y += p.vy * (1 + intensity * intensityBase); p.life -= 0.01; if (p.life <= 0) particles.splice(i, 1); ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }); ctx.restore(); }
-      if (document.getElementById('check-snow').checked) { ctx.save(); snowflakes.forEach(s => { s.y += s.speed - (intensity * 1.5); s.x += Math.sin(nowReal * 0.001 + s.swingOffset) * 0.5; if (s.y > canvas.height) { s.y = -10; s.x = Math.random() * canvas.width; } ctx.beginPath(); ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`; ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); }); ctx.restore(); }
+    if (document.getElementById('check-grid').checked) drawGrid(intensity, color1, color2);
 
-      const renderWithSelectiveRGB = (drawFunc) => {
-        const isRGB = document.getElementById('check-chromatic').checked && intensity > 0;
-        if (isRGB) {
-          const split = (intensity * 20) * intensityBase;
-          ctx.save(); ctx.globalCompositeOperation = 'screen';
-          ctx.save(); ctx.translate(split, 0); drawFunc('#ff0000', '#ff0000', false); ctx.restore();
-          ctx.save(); ctx.translate(-split, 0); drawFunc('#0000ff', '#0000ff', false); ctx.restore();
-          ctx.restore();
-          drawFunc(color1, color2, true);
-        } else {
-          drawFunc(color1, color2, true);
-        }
-      };
+    if (document.getElementById('check-particles').checked) { ctx.save(); particles.forEach((p, i) => { p.x += p.vx * (1 + intensity * intensityBase); p.y += p.vy * (1 + intensity * intensityBase); p.life -= 0.01; if (p.life <= 0) particles.splice(i, 1); ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }); ctx.restore(); }
+    if (document.getElementById('check-snow').checked) { ctx.save(); snowflakes.forEach(s => { s.y += s.speed - (intensity * 1.5); s.x += Math.sin(nowReal * 0.001 + s.swingOffset) * 0.5; if (s.y > canvas.height) { s.y = -10; s.x = Math.random() * canvas.width; } ctx.beginPath(); ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`; ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); }); ctx.restore(); }
 
-      renderWithSelectiveRGB((c1, c2, isFinal) => {
-        ctx.save(); ctx.translate(canvas.width/2 + mVX, canvas.height/2 + mVY);
+    const renderWithSelectiveRGB = (drawFunc) => {
+      const isRGB = document.getElementById('check-chromatic').checked && intensity > 0;
+      if (isRGB) {
+        const split = (intensity * 20) * intensityBase;
+        ctx.save(); ctx.globalCompositeOperation = 'screen';
+        ctx.save(); ctx.translate(split, 0); drawFunc('#ff0000', '#ff0000', false); ctx.restore();
+        ctx.save(); ctx.translate(-split, 0); drawFunc('#0000ff', '#0000ff', false); ctx.restore();
+        ctx.restore();
+        drawFunc(color1, color2, true);
+      } else {
+        drawFunc(color1, color2, true);
+      }
+    };
+
+    renderWithSelectiveRGB((c1, c2, isFinal) => {
+      ctx.save(); ctx.translate(canvas.width/2 + mVX, mVY + (intensity * 10 * intensityBase));
         const mainMode = document.getElementById('main-selector').value;
         if (intensity > 0 && mainMode !== 'audiobars') { ctx.translate((Math.random()-0.5)*intensity*8, (Math.random()-0.5)*intensity*8); }
 
@@ -806,7 +782,6 @@ function draw() {
         recOffscreenCtx.save();
         recOffscreenCtx.fillStyle = '#000000';
         recOffscreenCtx.fillRect(0, 0, recWidth, recHeight);
-
         if (isVintage) recOffscreenCtx.filter = 'sepia(0.8) brightness(0.9)';
 
         if (bgImage && document.getElementById('bg-image-layer').style.display !== 'none') {
@@ -862,7 +837,6 @@ function draw() {
           recOffscreenCtx.fillStyle = grad; recOffscreenCtx.fillRect(0, 0, recWidth, recHeight);
           recOffscreenCtx.restore();
         }
-
         recOffscreenCtx.restore();
       }
     }
