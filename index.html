@@ -690,8 +690,9 @@ function draw() {
       }
     };
 
-    renderWithSelectiveRGB((c1, c2, isFinal) => {
-      ctx.save(); ctx.translate(canvas.width/2 + mVX, mVY + (intensity * 10 * intensityBase));
+// 修正後
+renderWithSelectiveRGB((c1, c2, isFinal) => {
+  ctx.save(); ctx.translate(canvas.width/2 + mVX, canvas.height/2 + mVY + (intensity * 10 * intensityBase));
         const mainMode = document.getElementById('main-selector').value;
         if (intensity > 0 && mainMode !== 'audiobars') { ctx.translate((Math.random()-0.5)*intensity*8, (Math.random()-0.5)*intensity*8); }
 
